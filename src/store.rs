@@ -61,7 +61,7 @@ impl Store {
         })
     }
 
-    pub fn add<'a>(&mut self, key: String, value: &str) {
+    pub fn add(&mut self, key: String, value: &str) {
         self.vars.insert(key, encrypt(value));
     }
 
@@ -116,7 +116,7 @@ fn decrypt(value: &str) -> String {
     let data = BASE64_STANDARD
         .decode(value)
         .expect("value is valid base64");
-    let nonce = data[0..12].try_into().expect("nonce is a 96 bit value");
+    let nonce = data[0..12].into();
 
     key.zeroize();
 
@@ -151,5 +151,5 @@ fn encrypt(value: &str) -> String {
     // TODO: lots of copying here
     let data: Vec<u8> = [nonce.as_slice(), &encrypted].concat();
     use base64::prelude::*;
-    BASE64_STANDARD.encode(&data)
+    BASE64_STANDARD.encode(data)
 }

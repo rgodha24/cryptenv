@@ -1,20 +1,13 @@
+mod config;
+mod project;
 mod store;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use serde::{Deserialize, Serialize};
-use std::{borrow::Cow, collections::HashMap, fmt::Write, path::PathBuf, process};
-use store::Store;
+use std::process;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Config {
-    projects: HashMap<String, Project>,
-    dirs: Vec<String>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct Project {
-    vars: HashMap<String, String>,
-}
+pub use config::Config;
+pub use project::Project;
+pub use store::Store;
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -72,91 +65,6 @@ impl Shell {
     }
 }
 
-impl Config {
-    fn read() -> Self {
-        let config_path = shellexpand::tilde("~/.config/cryptenv.toml");
-
-        let config = std::fs::read_to_string(&*config_path).expect("Could not read config file");
-
-        toml::from_str(&config).expect("Could not parse config file")
-    }
-
-    fn dirs(&self) -> Vec<PathBuf> {
-        self.dirs
-            .iter()
-            .map(shellexpand::tilde)
-            .map(Cow::into_owned)
-            .map(PathBuf::from)
-            .collect()
-    }
-
-    fn unset_all_bash(&self) -> String {
-        let mut output = String::new();
-
-        for project in self.projects.values() {
-            for key in project.vars.keys() {
-                writeln!(output, "unset {}", key).unwrap();
-            }
-        }
-
-        output
-    }
-}
-
-impl Project {
-    fn to_bash(&self, store: &Store) -> String {
-        let mut output = String::new();
-
-        for (key, value) in &self.vars {
-            let variable = store.get(&value).map(|v| v.decrypt()).unwrap_or_else(|| {
-                eprintln!("cryptenv: variable {} not found", value);
-                process::exit(1);
-            });
-
-            writeln!(output, "export {}={}", key, variable.value()).unwrap();
-        }
-
-        output
-    }
-
-    /// get the project in the current directory
-    /// returns Project::default() if no project is found
-    fn get_from_dir() -> Self {
-        let mut config = Config::read();
-
-        let Some(project_dir) = Self::get_project_dir(&config) else {
-            eprintln!("cryptenv: current dir is not a project directory");
-            return Default::default();
-        };
-
-        // it's fine to remove the "project" from the config because config is dropped at the end
-        // of this function anyways
-        match config.projects.remove(&project_dir) {
-            Some(project) => project,
-            None => {
-                eprintln!("cryptenv: current project is not in the config file");
-                Default::default()
-            }
-        }
-    }
-
-    fn get_project_dir(config: &Config) -> Option<String> {
-        let current_dir = std::env::current_dir().unwrap();
-        let dirs = config.dirs();
-
-        for dir in dirs.into_iter() {
-            if current_dir.starts_with(&dir) {
-                let original_len = dir.components().collect::<Vec<_>>().len();
-                let parent = current_dir.components().skip(original_len).next()?;
-
-                return Some(parent.as_os_str().to_str().unwrap().to_string());
-            }
-        }
-
-        None
-    }
-}
-
 fn main() {
     let args = Args::parse();
 
@@ -207,9 +115,8 @@ fn main() {
 
             let project = project
                 .into_iter()
-                .filter_map(|project| config.projects.get(&project))
-                .cloned()
-                .next()
+                .filter_map(|project| config.projects().get(&project))
+                .next().cloned()
                 .unwrap_or_else(Project::get_from_dir);
 
             println!("{}", project.to_bash(&store));
