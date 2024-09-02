@@ -76,6 +76,11 @@ impl Store {
     pub fn keys(&self) -> impl Iterator<Item = &str> {
         self.vars.keys().map(|s| s.as_str())
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&str, EncryptedVariable)> {
+        use itertools::Itertools;
+        self.vars.keys().sorted().map(|k| (k.as_str(), self.get(k).expect("key exists")))
+    }
 }
 
 impl<'a> EncryptedVariable<'a> {

@@ -27,7 +27,7 @@ impl Project {
 
     /// get the project in the current directory
     /// returns Project::default() if no project is found
-    pub fn get_from_dir() -> Self {
+    pub fn get_from_cwd() -> Self {
         let mut config = Config::read();
 
         let Some(project_dir) = Self::get_project_dir(&config) else {
@@ -64,5 +64,8 @@ impl Project {
 
     pub fn keys(&self) -> impl Iterator<Item = &str> {
         self.vars.keys().map(String::as_str)
+    }
+    pub fn variables(&self) -> impl Iterator<Item = &str> {
+        self.vars.values().map(String::as_str)
     }
 }
