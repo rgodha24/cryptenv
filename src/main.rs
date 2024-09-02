@@ -1,14 +1,9 @@
-use std::{
-    borrow::Cow,
-    collections::{HashMap, HashSet},
-    fmt::Write,
-    path::PathBuf,
-    process,
-};
+mod store;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use keyring::Entry;
 use serde::{Deserialize, Serialize};
+use std::{borrow::Cow, collections::HashMap, fmt::Write, path::PathBuf, process};
+use store::Store;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Config {
@@ -42,8 +37,8 @@ enum Commands {
     Add {
         /// the name of the environment variable. automatically uppercased
         name: String,
-        /// the value of the environment variable. stored in the default encrypted package manager
-        /// on your os
+        /// the value of the environment variable.
+        /// stored in a JSON file with encrypted VALUES ONLY at dirs::data_dir()/cryptenv/store.json
         value: String,
 
         #[arg(short, long, default_value_t = false)]
@@ -86,14 +81,6 @@ impl Config {
         toml::from_str(&config).expect("Could not parse config file")
     }
 
-    fn get_all_keys<'a>(&'a self) -> HashSet<&'a str> {
-        self.projects
-            .values()
-            .map(|h| h.vars.keys().map(|s| s.as_str()))
-            .flatten()
-            .collect()
-    }
-
     fn dirs(&self) -> Vec<PathBuf> {
         self.dirs
             .iter()
@@ -102,25 +89,31 @@ impl Config {
             .map(PathBuf::from)
             .collect()
     }
+
+    fn unset_all_bash(&self) -> String {
+        let mut output = String::new();
+
+        for project in self.projects.values() {
+            for key in project.vars.keys() {
+                writeln!(output, "unset {}", key).unwrap();
+            }
+        }
+
+        output
+    }
 }
 
 impl Project {
-    fn to_bash(&self, config: &Config) -> String {
+    fn to_bash(&self, store: &Store) -> String {
         let mut output = String::new();
-        let mut all_keys = config.get_all_keys();
+
         for (key, value) in &self.vars {
-            let value = Entry::new("cryptenv", &value)
-                .unwrap()
-                .get_password()
-                .unwrap();
+            let variable = store.get(&value).map(|v| v.decrypt()).unwrap_or_else(|| {
+                eprintln!("cryptenv: variable {} not found", value);
+                process::exit(1);
+            });
 
-            all_keys.remove(key.as_str());
-
-            writeln!(output, "export {}={}", key, value).unwrap();
-        }
-
-        for k in all_keys.into_iter() {
-            writeln!(output, "unset {}", k).unwrap();
+            writeln!(output, "export {}={}", key, variable.value()).unwrap();
         }
 
         output
@@ -173,35 +166,45 @@ fn main() {
             value,
             overwrite,
         } => {
+            let mut store = Store::read();
             let name = name.to_uppercase();
-            let entry = Entry::new("cryptenv", &name).unwrap();
 
-            let is_used = entry.get_password().is_ok();
+            let is_used = store.get(&name).is_some();
             match (is_used, overwrite) {
                 (false, _) => {
-                    entry.set_password(&value).unwrap();
+                    store.add(name, &value);
                 }
                 (true, true) => {
                     eprintln!("Overwriting value for {}", name);
-                    entry.set_password(&value).unwrap();
+                    store.add(name, &value);
                 }
                 (true, false) => {
                     eprintln!(
                         "Value for {} already exists. Use --overwrite to replace it",
                         name
                     );
-                    process::exit(1);
                 }
             }
+
+            store.save_to_disk();
         }
         Commands::Get { name } => {
+            let store = Store::read();
             let name = name.to_uppercase();
-            let entry = Entry::new("cryptenv", &name).unwrap();
-            let value = entry.get_password().unwrap();
-            println!("{}", value);
+
+            let variable = store.get(&name).map(|v| v.decrypt()).unwrap_or_else(|| {
+                eprintln!("cryptenv: variable {} not found", name);
+                process::exit(1);
+            });
+
+            println!("{}", variable.value());
         }
         Commands::Load { project } => {
             let config = Config::read();
+            let store = Store::read();
+
+            println!("{}", config.unset_all_bash());
+
             let project = project
                 .into_iter()
                 .filter_map(|project| config.projects.get(&project))
@@ -209,7 +212,7 @@ fn main() {
                 .next()
                 .unwrap_or_else(Project::get_from_dir);
 
-            println!("{}", project.to_bash(&config));
+            println!("{}", project.to_bash(&store));
         }
         Commands::Init { shell } => {
             println!("{}", shell.init());
