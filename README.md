@@ -1,6 +1,9 @@
 # cryptenv
 
-A super simple env variable manager. It saves variables using the [keyring](docs.rs/keyring) crate, which puts them into the macos keychain (or windows/linux equivalent). then, by editing your cryptenv.toml config, you can set environment variables based on your current project. projects are defined by the directory you're currently in. 
+A super simple env variable manager.
+It encrypts and saves your environment in a JSON file at DATA_DIR/cryptenv/store.json. 
+The encryption key is kept in your computers secure store using [keyring](docs.rs/keyring).
+Then, by editing your cryptenv.toml file, you can set environment variables for specific projects on your computer, which are automatically changed whenever you `cd` into the project directory.
 
 For example, if you had a directory called `~/Coding/` with this layout
 ```
@@ -13,10 +16,10 @@ you would define your `cryptenv.toml` like this
 ```toml
 dirs = ["~/Coding/"]
 
-[projects.company-project]
+[projects.company-project.vars]
 CLOUDFLARE_API_TOKEN = "COMPANY_CLOUDFLARE_TOKEN"
 
-[projects.personal-project]
+[projects.personal-project.vars]
 CLOUDFLARE_API_TOKEN = "PERSONAL_CLOUDFLARE_TOKEN"
 
 ```
@@ -24,16 +27,13 @@ CLOUDFLARE_API_TOKEN = "PERSONAL_CLOUDFLARE_TOKEN"
 and add your variables like this `cryptenv add COMPANY_CLOUDFLARE_TOKEN <token>` and `cryptenv add PERSONAL_CLOUDFLARE_TOKEN <token>`
 
 ## installation 
-note: this is very much so a work in progress, you probably shouldn't install it lol
+note: this is very much so a work in progress. no semver guarantees!
 
 `cargo install --git github.com/rgodha24/cryptenv`
 
 and edit your .zshrc
 ```zsh
-_crypt_autoload_hook () {
-  cryptenv load
-}
-add-zsh-hook chpwd _crypt_autoload_hook
+eval "$(cryptenv init zsh)"
 ```
 
 the config file lives in `~/.config/cryptenv.toml`
