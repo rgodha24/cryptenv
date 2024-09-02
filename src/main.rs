@@ -6,7 +6,7 @@ use std::{
     process,
 };
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use keyring::Entry;
 use serde::{Deserialize, Serialize};
 
@@ -16,7 +16,7 @@ struct Config {
     dirs: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct Project {
     vars: HashMap<String, String>,
 }
@@ -31,6 +31,8 @@ struct Args {
 #[derive(Subcommand)]
 enum Commands {
     /// loads the env for the current directory
+    ///
+    /// returns the zsh script to set the environment variables for the current project
     Load {
         #[arg(short, long)]
         project: Option<String>,
@@ -56,6 +58,23 @@ enum Commands {
         /// the name of the environment variable. automatically uppercased
         name: String,
     },
+
+    Init {
+        shell: Shell,
+    },
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug)]
+enum Shell {
+    Zsh,
+}
+
+impl Shell {
+    fn init(&self) -> &'static str {
+        match self {
+            Shell::Zsh => include_str!("../shells/init.zsh"),
+        }
+    }
 }
 
 impl Config {
@@ -106,6 +125,43 @@ impl Project {
 
         output
     }
+
+    /// get the project in the current directory
+    /// returns Project::default() if no project is found
+    fn get_from_dir() -> Self {
+        let mut config = Config::read();
+
+        let Some(project_dir) = Self::get_project_dir(&config) else {
+            eprintln!("cryptenv: current dir is not a project directory");
+            return Default::default();
+        };
+
+        // it's fine to remove the "project" from the config because config is dropped at the end
+        // of this function anyways
+        match config.projects.remove(&project_dir) {
+            Some(project) => project,
+            None => {
+                eprintln!("cryptenv: current project is not in the config file");
+                Default::default()
+            }
+        }
+    }
+
+    fn get_project_dir(config: &Config) -> Option<String> {
+        let current_dir = std::env::current_dir().unwrap();
+        let dirs = config.dirs();
+
+        for dir in dirs.into_iter() {
+            if current_dir.starts_with(&dir) {
+                let original_len = dir.components().collect::<Vec<_>>().len();
+                let parent = current_dir.components().skip(original_len).next()?;
+
+                return Some(parent.as_os_str().to_str().unwrap().to_string());
+            }
+        }
+
+        None
+    }
 }
 
 fn main() {
@@ -119,8 +175,7 @@ fn main() {
         } => {
             let name = name.to_uppercase();
             let entry = Entry::new("cryptenv", &name).unwrap();
-            println!("{:?}", entry);
-            println!("{:?}", entry.get_password());
+
             let is_used = entry.get_password().is_ok();
             match (is_used, overwrite) {
                 (false, _) => {
@@ -147,32 +202,17 @@ fn main() {
         }
         Commands::Load { project } => {
             let config = Config::read();
-
-            let project = project.unwrap_or_else(|| {
-                let current_dur = std::env::current_dir().unwrap();
-                let dirs = config.dirs();
-
-                for dir in dirs.into_iter() {
-                    if current_dur.starts_with(&dir) {
-                        let original_len = dir.components().collect::<Vec<_>>().len();
-                        let parent = current_dur.components().skip(original_len).next().unwrap();
-
-                        return parent.as_os_str().to_str().unwrap().to_string();
-                    }
-                }
-
-                eprintln!("Could not find project in config. exiting...");
-                process::exit(0);
-            });
-
-            eprintln!("Loading project: {}", project);
-
-            let Some(project) = config.projects.get(&project) else {
-                eprintln!("Project not found in config. exiting...");
-                process::exit(0);
-            };
+            let project = project
+                .into_iter()
+                .filter_map(|project| config.projects.get(&project))
+                .cloned()
+                .next()
+                .unwrap_or_else(Project::get_from_dir);
 
             println!("{}", project.to_bash(&config));
+        }
+        Commands::Init { shell } => {
+            println!("{}", shell.init());
         }
     }
 }
