@@ -31,7 +31,6 @@ impl Project {
         let mut config = Config::read();
 
         let Some(project_dir) = Self::get_project_dir(&config) else {
-            eprintln!("cryptenv: current dir is not a project directory");
             return Default::default();
         };
 
@@ -40,7 +39,6 @@ impl Project {
         match config.projects_mut().remove(&project_dir) {
             Some(project) => project,
             None => {
-                eprintln!("cryptenv: current project is not in the config file");
                 Default::default()
             }
         }
