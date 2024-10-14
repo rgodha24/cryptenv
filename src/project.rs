@@ -26,8 +26,7 @@ impl Project {
     }
 
     /// get the project in the current directory
-    /// returns Project::default() if no project is found
-    pub fn get_from_cwd() -> Self {
+    pub fn get_from_cwd() -> Option<Self> {
         let mut config = Config::read();
 
         let Some(project_dir) = Self::get_project_dir(&config) else {
@@ -36,15 +35,10 @@ impl Project {
 
         // it's fine to remove the "project" from the config because config is dropped at the end
         // of this function anyways
-        match config.projects_mut().remove(&project_dir) {
-            Some(project) => project,
-            None => {
-                Default::default()
-            }
-        }
+        config.projects_mut().remove(&project_dir)
     }
 
-    fn get_project_dir(config: &Config) -> Option<String> {
+    pub fn get_project_dir(config: &Config) -> Option<String> {
         let current_dir = std::env::current_dir().unwrap();
         let dirs = config.dirs();
 

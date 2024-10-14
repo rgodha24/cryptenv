@@ -3,7 +3,7 @@ mod project;
 mod store;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use std::process;
+use std::process::{self};
 
 pub use config::Config;
 pub use project::Project;
@@ -25,6 +25,9 @@ enum Commands {
         #[arg(short, long)]
         project: Option<String>,
     },
+    /// lists the project that the current directory is in. this can be used for a shell prompt
+    /// like [starship](https://starship.rs)
+    Project,
     /// add an environment variable to the store
     Add {
         /// the name of the environment variable. automatically uppercased
@@ -123,9 +126,21 @@ fn main() {
                 .filter_map(|project| config.projects().get(&project))
                 .next()
                 .cloned()
-                .unwrap_or_else(Project::get_from_cwd);
+                .unwrap_or_else(|| Project::get_from_cwd().unwrap_or_default());
 
             println!("{}", project.to_bash(&store));
+        }
+        Commands::Project => {
+            let dir = Project::get_project_dir(&Config::read());
+
+            match dir {
+                Some(d) => {
+                    println!("{d}");
+                }
+                _ => {
+                    process::exit(1);
+                }
+            }
         }
         Commands::Init { shell } => {
             println!("{}", shell.init());
