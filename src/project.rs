@@ -58,6 +58,12 @@ impl Project {
         None
     }
 
+    pub fn get_by_name(name: &str) -> Option<Self> {
+        let config = Config::read();
+
+        config.projects().get(name).cloned()
+    }
+
     pub fn keys(&self) -> impl Iterator<Item = &str> {
         self.vars.keys().map(String::as_str)
     }
