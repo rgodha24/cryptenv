@@ -1,5 +1,5 @@
 function cryptenv_load
-    eval (cryptenv load fish)
+    cryptenv load fish | source
 end
 
 function on_directory_change --on-variable PWD

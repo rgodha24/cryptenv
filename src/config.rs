@@ -1,5 +1,11 @@
-use std::{borrow::Cow, collections::HashMap, fmt::Write, path::PathBuf};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    fmt::Write,
+    path::PathBuf,
+};
 
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 use crate::{Project, Shell};
@@ -28,18 +34,23 @@ impl Config {
             .collect()
     }
 
-    pub fn unset_all(&self, shell: Shell) -> String {
+    pub fn unset(&self, shell: Shell) -> String {
         let mut output = String::new();
+        let vars: HashSet<_> = std::env::vars().map(|(k, _)| k).collect();
 
-        let unset = match shell {
-            Shell::Zsh => "unset",
-            Shell::Fish => "set -le",
-        };
+        for key in self
+            .projects
+            .values()
+            .flat_map(|proj| proj.keys())
+            .dedup()
+            .filter(|key| vars.contains(key.to_owned()))
+        {
+            let res = match shell {
+                Shell::Zsh => writeln!(output, "unset {key}"),
+                Shell::Fish => writeln!(output, "set -ge {key};"),
+            };
 
-        for project in self.projects.values() {
-            for key in project.keys() {
-                writeln!(output, "{unset} {}", key).unwrap();
-            }
+            res.unwrap();
         }
 
         output

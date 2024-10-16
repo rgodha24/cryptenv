@@ -122,7 +122,7 @@ fn main() {
             let config = Config::read();
             let store = Store::read();
 
-            println!("{}", config.unset_all(shell));
+            println!("{}", config.unset(shell));
 
             let project = project
                 .into_iter()

@@ -21,7 +21,7 @@ impl Project {
 
             let res = match shell {
                 Shell::Zsh => writeln!(output, "export {}={}", key, variable.value()),
-                Shell::Fish => writeln!(output, "set -lx {} {}", key, variable.value()),
+                Shell::Fish => writeln!(output, "set -gx {} {};", key, variable.value()),
             };
             res.expect("writing to string succeeded");
         }
