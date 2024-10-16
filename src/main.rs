@@ -24,6 +24,7 @@ enum Commands {
     Load {
         #[arg(short, long)]
         project: Option<String>,
+        shell: Shell,
     },
     /// lists the project that the current directory is in. this can be used for a shell prompt
     /// like [starship](https://starship.rs)
@@ -61,14 +62,16 @@ enum Commands {
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
-enum Shell {
+pub enum Shell {
     Zsh,
+    Fish,
 }
 
 impl Shell {
     fn init(&self) -> &'static str {
         match self {
             Shell::Zsh => include_str!("../shells/init.zsh"),
+            Shell::Fish => include_str!("../shells/init.fish"),
         }
     }
 }
@@ -115,11 +118,11 @@ fn main() {
 
             println!("{}", variable.value());
         }
-        Commands::Load { project } => {
+        Commands::Load { project, shell } => {
             let config = Config::read();
             let store = Store::read();
 
-            println!("{}", config.unset_all_bash());
+            println!("{}", config.unset_all(shell));
 
             let project = project
                 .into_iter()
@@ -128,7 +131,7 @@ fn main() {
                 .cloned()
                 .unwrap_or_else(|| Project::get_from_cwd().unwrap_or_default());
 
-            println!("{}", project.to_bash(&store));
+            println!("{}", project.to_shell(&store, shell));
         }
         Commands::Project => {
             let dir = Project::get_project_dir(&Config::read());

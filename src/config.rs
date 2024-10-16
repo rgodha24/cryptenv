@@ -2,7 +2,7 @@ use std::{borrow::Cow, collections::HashMap, fmt::Write, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::Project;
+use crate::{Project, Shell};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -28,12 +28,17 @@ impl Config {
             .collect()
     }
 
-    pub fn unset_all_bash(&self) -> String {
+    pub fn unset_all(&self, shell: Shell) -> String {
         let mut output = String::new();
+
+        let unset = match shell {
+            Shell::Zsh => "unset",
+            Shell::Fish => "set -le",
+        };
 
         for project in self.projects.values() {
             for key in project.keys() {
-                writeln!(output, "unset {}", key).unwrap();
+                writeln!(output, "{unset} {}", key).unwrap();
             }
         }
 

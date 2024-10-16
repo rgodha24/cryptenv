@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Write, process};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{config::Config, store::Store};
+use crate::{config::Config, store::Store, Shell};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Project {
@@ -10,7 +10,7 @@ pub struct Project {
 }
 
 impl Project {
-    pub fn to_bash(&self, store: &Store) -> String {
+    pub fn to_shell(&self, store: &Store, shell: Shell) -> String {
         let mut output = String::new();
 
         for (key, value) in &self.vars {
@@ -19,7 +19,11 @@ impl Project {
                 process::exit(1);
             });
 
-            writeln!(output, "export {}={}", key, variable.value()).unwrap();
+            let res = match shell {
+                Shell::Zsh => writeln!(output, "export {}={}", key, variable.value()),
+                Shell::Fish => writeln!(output, "set -lx {} {}", key, variable.value()),
+            };
+            res.expect("writing to string succeeded");
         }
 
         output
