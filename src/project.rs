@@ -70,4 +70,7 @@ impl Project {
     pub fn variables(&self) -> impl Iterator<Item = &str> {
         self.vars.values().map(String::as_str)
     }
+    pub fn into_inner(self) -> HashMap<String, String> {
+        self.vars
+    }
 }

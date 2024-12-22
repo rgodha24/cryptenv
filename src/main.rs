@@ -54,6 +54,9 @@ pub enum ProjectSubcommand {
     /// lists all the names of the environment variables in the current project
     /// you can either pass in the project, or use the project in CWD
     List { project: String },
+    /// returns the environment variables of the current project in the
+    /// `KEY=VALUE` format used by .env files
+    Export { project: String },
 }
 
 #[derive(Subcommand, Clone, Debug)]
@@ -204,6 +207,21 @@ fn main() {
                     Some(project) => {
                         for v in project.variables() {
                             println!("{}", v);
+                        }
+                    }
+                    None => {
+                        eprintln!("project {project} was not find");
+                    }
+                }
+            }
+            ProjectSubcommand::Export { project } => {
+                let p = Project::get_by_name(&project);
+                let store = Store::read();
+
+                match p {
+                    Some(project) => {
+                        for (k, v) in project.into_inner() {
+                            println!("{}={}", k, store.get(&v).unwrap().decrypt().value());
                         }
                     }
                     None => {
