@@ -5,12 +5,12 @@ mod store;
 use clap::{Parser, Subcommand, ValueEnum};
 use std::process::{self};
 
-pub use config::Config;
+pub use config::{Config, ProjectConfig};
 pub use project::Project;
 pub use store::Store;
 
 #[derive(Parser)]
-#[command(version, about)]
+#[command(version, about = "A simple encrypted environment variable manager")]
 struct Args {
     #[command(subcommand)]
     command: Commands,
@@ -18,21 +18,57 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Checks every project and makes sure that the env variables they're referencing are all in
-    /// the cryptenv store
+    /// Check if all project variables are defined in the store
     Check,
-    /// set up cryptenv for your shell
-    Init { shell: Shell },
-
-    /// edit the env variables in the cryptenv store
-    Env {
-        #[command(subcommand)]
-        subcommand: EnvSubcommand,
+    /// Set up cryptenv for your shell
+    Init {
+        /// The shell to initialize
+        shell: Shell,
     },
-    /// manage projects in the cryptenv store
-    Project {
-        #[command(subcommand)]
-        subcommand: ProjectSubcommand,
+    /// Add an environment variable to the store
+    Add {
+        /// The name of the environment variable (automatically uppercased)
+        name: String,
+        /// The value of the environment variable (will be encrypted)
+        value: String,
+        /// Overwrite the value if it already exists
+        #[arg(short, long, default_value_t = false)]
+        overwrite: bool,
+    },
+    /// Get an environment variable from the store
+    Get {
+        /// The name of the environment variable (automatically uppercased)
+        name: String,
+    },
+    /// List environment variables in the store
+    List {
+        /// Show decrypted values
+        #[arg(short, long, default_value_t = false)]
+        decrypt: bool,
+    },
+    /// Load environment for the current directory
+    Load {
+        /// The shell to generate script for
+        shell: Shell,
+    },
+    /// Get the name of the current project
+    Project,
+    /// List variables in a project
+    Variables {
+        /// The project name (defaults to current directory if not specified)
+        project: Option<String>,
+    },
+    /// Export the environment variables of a project in KEY=VALUE format
+    Export {
+        /// The project name (defaults to current directory if not specified)
+        project: Option<String>,
+    },
+    /// List all available profiles
+    Profiles,
+    /// Show variables in a specific profile
+    ProfileVars {
+        /// The name of the profile to show variables for
+        name: String,
     },
 }
 
@@ -40,52 +76,6 @@ enum Commands {
 pub enum Shell {
     Zsh,
     Fish,
-}
-
-#[derive(Subcommand, Clone, Debug)]
-pub enum ProjectSubcommand {
-    /// loads the env for the current directory. you probably shouldn't run this directly
-    ///
-    /// returns the shell script to set the environment variables for the current project
-    Load { shell: Shell },
-    /// gets the name of the project in CWD
-    /// exits with status code 1 if we're not in a project
-    Name,
-    /// lists all the names of the environment variables in the current project
-    /// you can either pass in the project, or use the project in CWD
-    List { project: String },
-    /// returns the environment variables of the current project in the
-    /// `KEY=VALUE` format used by .env files
-    Export { project: String },
-}
-
-#[derive(Subcommand, Clone, Debug)]
-pub enum EnvSubcommand {
-    /// add an environment variable to the store
-    Add {
-        /// the name of the environment variable. automatically uppercased
-        name: String,
-        /// the value of the environment variable.
-        /// stored in a JSON file with encrypted VALUES ONLY at dirs::data_dir()/cryptenv/store.json
-        value: String,
-
-        #[arg(short, long, default_value_t = false)]
-        /// overwrite the value if it already exists
-        /// WARNING: this will irrevcably delete the old value
-        /// default: false
-        overwrite: bool,
-    },
-    /// read an environment variable from the store
-    Get {
-        /// the name of the environment variable. automatically uppercased
-        name: String,
-    },
-    /// lists all the environment variables in the store
-    List {
-        /// whether to show the value as well
-        #[arg(short, long, default_value_t = false)]
-        decrypt: bool,
-    },
 }
 
 impl Shell {
@@ -103,17 +93,40 @@ fn main() {
     match args.command {
         Commands::Check => {
             let config = Config::read();
+            #[cfg(debug_assertions)]
+            println!("Config: {:#?}", config);
             let store = Store::read();
             let mut found_error = false;
 
-            for (name, project) in config.projects().iter() {
-                for variable in project.variables() {
-                    if store.get(variable).is_none() {
+            // Check variables from project configs
+            for (name, project_config) in config.get_project_configs() {
+                // Check direct vars
+                for var_name in project_config.vars.values() {
+                    if store.get(var_name).is_none() {
                         found_error = true;
-
                         println!(
                             "cryptenv: variable {} defined in project {} not found in store",
-                            variable, name
+                            var_name, name
+                        );
+                    }
+                }
+
+                // Check vars from referenced profiles
+                for profile_name in &project_config.profiles {
+                    if let Some(profile) = config.get_profile(profile_name) {
+                        for var_name in profile.values() {
+                            if store.get(var_name).is_none() {
+                                found_error = true;
+                                println!(
+                                    "cryptenv: variable {} defined in profile {} (referenced by project {}) not found in store",
+                                    var_name, profile_name, name
+                                );
+                            }
+                        }
+                    } else {
+                        println!(
+                            "cryptenv: warning - profile {} referenced by project {} not found",
+                            profile_name, name
                         );
                     }
                 }
@@ -122,113 +135,153 @@ fn main() {
             if found_error {
                 process::exit(1);
             } else {
-                println!("the config is correct!");
+                println!("All variables found in store!");
             }
         }
         Commands::Init { shell } => {
             println!("{}", shell.init());
         }
-        Commands::Env { subcommand } => match subcommand {
-            EnvSubcommand::Add {
-                name,
-                value,
-                overwrite,
-            } => {
-                let mut store = Store::read();
-                let name = name.to_uppercase();
+        Commands::Add {
+            name,
+            value,
+            overwrite,
+        } => {
+            let mut store = Store::read();
+            let name = name.to_uppercase();
 
-                let is_used = store.get(&name).is_some();
-                match (is_used, overwrite) {
-                    (false, _) => {
-                        store.add(name, &value);
-                    }
-                    (true, true) => {
-                        eprintln!("Overwriting value for {}", name);
-                        store.add(name, &value);
-                    }
-                    (true, false) => {
-                        eprintln!(
-                            "Value for {} already exists. Use --overwrite to replace it",
-                            name
-                        );
-                    }
+            let is_used = store.get(&name).is_some();
+            match (is_used, overwrite) {
+                (false, _) => {
+                    store.add(name.clone(), &value);
+                    println!("Added {} to store", name);
                 }
-
-                store.save_to_disk();
+                (true, true) => {
+                    eprintln!("Overwriting value for {}", name);
+                    store.add(name.clone(), &value);
+                }
+                (true, false) => {
+                    eprintln!(
+                        "Value for {} already exists. Use --overwrite to replace it",
+                        name
+                    );
+                }
             }
-            EnvSubcommand::Get { name } => {
-                let store = Store::read();
-                let name = name.to_uppercase();
 
-                let variable = store.get(&name).map(|v| v.decrypt()).unwrap_or_else(|| {
-                    eprintln!("cryptenv: variable {} not found", name);
+            store.save_to_disk();
+        }
+        Commands::Get { name } => {
+            let store = Store::read();
+            let name = name.to_uppercase();
+
+            let variable = store.get(&name).map(|v| v.decrypt()).unwrap_or_else(|| {
+                eprintln!("cryptenv: variable {} not found", name);
+                process::exit(1);
+            });
+
+            println!("{}", variable.value());
+        }
+        Commands::List { decrypt } => {
+            let store = Store::read();
+
+            for (name, variable) in store.iter() {
+                if decrypt {
+                    println!("{}={}", name, variable.decrypt().value());
+                } else {
+                    println!("{}", name);
+                }
+            }
+        }
+        Commands::Load { shell } => {
+            let config = Config::read();
+            let store = Store::read();
+            let project = Project::get_from_cwd().unwrap_or_default();
+
+            println!("{}", config.unset(shell));
+            println!("{}", project.to_shell(&store, shell));
+        }
+        Commands::Project => {
+            let dir = Project::get_project_dir(&Config::read());
+
+            match dir {
+                Some(d) => {
+                    println!("{d}");
+                }
+                _ => {
+                    eprintln!("Not in a project directory");
                     process::exit(1);
-                });
-
-                println!("{}", variable.value());
-            }
-            EnvSubcommand::List { decrypt } => {
-                let store = Store::read();
-
-                for (name, variable) in store.iter() {
-                    if decrypt {
-                        println!("{}={}", name, variable.decrypt().value());
-                    } else {
-                        println!("{}", name);
-                    }
                 }
             }
-        },
+        }
+        Commands::Variables { project } => {
+            let p = Project::get_current_or_named(project.as_deref());
 
-        Commands::Project { subcommand } => match subcommand {
-            ProjectSubcommand::Load { shell } => {
-                let config = Config::read();
-                let store = Store::read();
-                let project = Project::get_from_cwd().unwrap_or_default();
-
-                println!("{}", config.unset(shell));
-                println!("{}", project.to_shell(&store, shell));
-            }
-            ProjectSubcommand::Name => {
-                let dir = Project::get_project_dir(&Config::read());
-
-                match dir {
-                    Some(d) => {
-                        println!("{d}");
-                    }
-                    _ => {
-                        process::exit(1);
+            match p {
+                Some(project) => {
+                    for v in project.variables() {
+                        println!("{}", v);
                     }
                 }
-            }
-            ProjectSubcommand::List { project } => {
-                let p = Project::get_by_name(&project);
-                match p {
-                    Some(project) => {
-                        for v in project.variables() {
-                            println!("{}", v);
-                        }
+                None => {
+                    match project {
+                        None => eprintln!("Not in a project directory"),
+                        Some(project) => eprintln!("Project {} not found", project),
                     }
-                    None => {
-                        eprintln!("project {project} was not find");
-                    }
+                    process::exit(1);
                 }
             }
-            ProjectSubcommand::Export { project } => {
-                let p = Project::get_by_name(&project);
-                let store = Store::read();
+        }
+        Commands::Export { project } => {
+            let p = Project::get_current_or_named(project.as_deref());
+            let store = Store::read();
 
-                match p {
-                    Some(project) => {
-                        for (k, v) in project.into_inner() {
-                            println!("{}={}", k, store.get(&v).unwrap().decrypt().value());
-                        }
-                    }
-                    None => {
-                        eprintln!("project {project} was not find");
+            match p {
+                Some(project) => {
+                    for (k, v) in project.into_inner() {
+                        println!("{}={}", k, store.get(&v).unwrap().decrypt().value());
                     }
                 }
+                None => {
+                    match project {
+                        None => eprintln!("Not in a project directory"),
+                        Some(project) => eprintln!("Project {} not found", project),
+                    }
+                    process::exit(1);
+                }
             }
-        },
+        }
+        Commands::Profiles => {
+            let config = Config::read();
+
+            if config.get_profiles().is_empty() {
+                println!("No profiles defined");
+                return;
+            }
+
+            println!("Available profiles:");
+            for profile_name in config.get_profiles().keys() {
+                println!("  {}", profile_name);
+            }
+        }
+        Commands::ProfileVars { name } => {
+            let config = Config::read();
+
+            match config.get_profile(&name) {
+                Some(profile) => {
+                    if profile.is_empty() {
+                        println!("Profile '{}' has no variables", name);
+                        return;
+                    }
+
+                    println!("Variables in profile '{}':", name);
+                    for (key, value) in profile {
+                        println!("  {}={}", key, value);
+                    }
+                }
+                None => {
+                    eprintln!("Profile '{}' not found", name);
+                    process::exit(1);
+                }
+            }
+        }
     }
 }

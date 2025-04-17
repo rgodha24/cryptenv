@@ -1,5 +1,5 @@
 cryptenv_load () {
-  eval "$(cryptenv project load zsh)"
+  eval "$(cryptenv load zsh)"
 }
 
 add-zsh-hook chpwd cryptenv_load

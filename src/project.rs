@@ -29,17 +29,23 @@ impl Project {
         output
     }
 
-    /// get the project in the current directory
+    /// Get the project in the current directory
     pub fn get_from_cwd() -> Option<Self> {
-        let mut config = Config::read();
+        let config = Config::read();
 
         let Some(project_dir) = Self::get_project_dir(&config) else {
-            return Default::default();
+            return None;
         };
 
-        // it's fine to remove the "project" from the config because config is dropped at the end
-        // of this function anyways
-        config.projects_mut().remove(&project_dir)
+        Self::from_project_config(&project_dir, &config)
+    }
+
+    /// Get the current project or the project with the given name
+    pub fn get_current_or_named(name: Option<&str>) -> Option<Self> {
+        match name {
+            Some(name) => Self::get_by_name(name),
+            None => Self::get_from_cwd(),
+        }
     }
 
     pub fn get_project_dir(config: &Config) -> Option<String> {
@@ -60,16 +66,42 @@ impl Project {
 
     pub fn get_by_name(name: &str) -> Option<Self> {
         let config = Config::read();
+        Self::from_project_config(name, &config)
+    }
 
-        config.projects().get(name).cloned()
+    fn from_project_config(name: &str, config: &Config) -> Option<Self> {
+        let project_config = config.get_project_config(name)?;
+
+        let mut project = Project::default();
+
+        // Add vars from the project config
+        for (key, value) in &project_config.vars {
+            project.vars.insert(key.clone(), value.clone());
+        }
+
+        // Add vars from profiles
+        for profile_name in &project_config.profiles {
+            if let Some(profile) = config.get_profile(profile_name) {
+                for (key, value) in profile {
+                    // Project-specific vars take precedence over profile vars
+                    if !project.vars.contains_key(key) {
+                        project.vars.insert(key.clone(), value.clone());
+                    }
+                }
+            }
+        }
+
+        Some(project)
     }
 
     pub fn keys(&self) -> impl Iterator<Item = &str> {
         self.vars.keys().map(String::as_str)
     }
+
     pub fn variables(&self) -> impl Iterator<Item = &str> {
         self.vars.values().map(String::as_str)
     }
+
     pub fn into_inner(self) -> HashMap<String, String> {
         self.vars
     }
