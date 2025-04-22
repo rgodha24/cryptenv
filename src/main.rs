@@ -3,7 +3,7 @@ mod project;
 mod store;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use std::process::{self};
+use std::process::{self, Command};
 
 pub use config::{Config, ProjectConfig};
 pub use project::Project;
@@ -69,6 +69,13 @@ enum Commands {
     ProfileVars {
         /// The name of the profile to show variables for
         name: String,
+    },
+    /// Run a command with the environment variables from a profile
+    Run {
+        /// The name of the profile to use
+        profile: String,
+        /// The command to run
+        command: Vec<String>,
     },
 }
 
@@ -279,6 +286,58 @@ fn main() {
                 }
                 None => {
                     eprintln!("Profile '{}' not found", name);
+                    process::exit(1);
+                }
+            }
+        }
+        Commands::Run { profile, command } => {
+            if command.is_empty() {
+                eprintln!("No command specified");
+                process::exit(1);
+            }
+
+            let config = Config::read();
+            let store = Store::read();
+
+            let profile_vars = match config.get_profile(&profile) {
+                Some(profile) => profile,
+                None => {
+                    eprintln!("Profile '{}' not found", profile);
+                    process::exit(1);
+                }
+            };
+
+            if profile_vars.is_empty() {
+                eprintln!("Profile '{}' has no variables", profile);
+                process::exit(1);
+            }
+
+            let mut cmd = Command::new(&command[0]);
+
+            // Add the remaining arguments
+            if command.len() > 1 {
+                cmd.args(&command[1..]);
+            }
+
+            // Add environment variables from the profile
+            for (key, value) in profile_vars {
+                let variable = store.get(value).map(|v| v.decrypt()).unwrap_or_else(|| {
+                    eprintln!("cryptenv: variable {} not found", value);
+                    process::exit(1);
+                });
+
+                cmd.env(key, variable.value());
+            }
+
+            // Execute the command
+            match cmd.status() {
+                Ok(status) => {
+                    if !status.success() {
+                        process::exit(status.code().unwrap_or(1));
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to execute command: {}", e);
                     process::exit(1);
                 }
             }

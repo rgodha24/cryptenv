@@ -50,6 +50,13 @@ cryptenv add CLOUDFLARE_EMAIL_VALUE <email>
 
 You can list available profiles with `cryptenv profiles` and view variables in a profile with `cryptenv profile-vars <profile-name>`.
 
+You can also run a command with the environment variables from a specific profile:
+```bash
+cryptenv run cloud-dev -- aws s3 ls
+```
+
+This will execute the command after `--` with all environment variables from the specified profile.
+
 ## installation 
 note: this is very much so a work in progress. no semver guarantees!
 
