@@ -180,19 +180,17 @@ fn main() {
             let store = Store::read();
             let name = name.to_uppercase();
 
-            let variable = store.get(&name).map(|v| v.decrypt()).unwrap_or_else(|| {
-                eprintln!("cryptenv: variable {} not found", name);
-                process::exit(1);
-            });
+            let variable = store.get_decrypted_or_exit(&name);
 
             println!("{}", variable.value());
         }
         Commands::List { decrypt } => {
             let store = Store::read();
 
-            for (name, variable) in store.iter() {
+            for (name, _) in store.iter() {
                 if decrypt {
-                    println!("{}={}", name, variable.decrypt().value());
+                    let variable = store.get_decrypted_or_exit(name);
+                    println!("{}={}", name, variable.value());
                 } else {
                     println!("{}", name);
                 }
@@ -244,7 +242,8 @@ fn main() {
             match p {
                 Some(project) => {
                     for (k, v) in project.into_inner() {
-                        println!("{}={}", k, store.get(&v).unwrap().decrypt().value());
+                        let variable = store.get_decrypted_or_exit(&v);
+                        println!("{}={}", k, variable.value());
                     }
                 }
                 None => {
@@ -321,10 +320,7 @@ fn main() {
 
             // Add environment variables from the profile
             for (key, value) in profile_vars {
-                let variable = store.get(value).map(|v| v.decrypt()).unwrap_or_else(|| {
-                    eprintln!("cryptenv: variable {} not found", value);
-                    process::exit(1);
-                });
+                let variable = store.get_decrypted_or_exit(value);
 
                 cmd.env(key, variable.value());
             }

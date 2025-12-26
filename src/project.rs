@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Write, process};
+use std::{collections::HashMap, fmt::Write};
 
 use serde::{Deserialize, Serialize};
 
@@ -14,10 +14,7 @@ impl Project {
         let mut output = String::new();
 
         for (key, value) in &self.vars {
-            let variable = store.get(value).map(|v| v.decrypt()).unwrap_or_else(|| {
-                eprintln!("cryptenv: variable {} not found", value);
-                process::exit(1);
-            });
+            let variable = store.get_decrypted_or_exit(value);
 
             let res = match shell {
                 Shell::Zsh => writeln!(output, "export {}={}", key, variable.value()),
