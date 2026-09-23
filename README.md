@@ -39,6 +39,8 @@ vars = { CLOUDFLARE_API_TOKEN = "PERSONAL_CLOUDFLARE_TOKEN" }
 simple-project = ["cloud-dev"]
 ```
 
+Git worktrees that live outside your `dirs` (e.g. `~/.worktrees/company-project-feature`) resolve to the project of their main checkout.
+
 and add your variables like this:
 ```bash
 cryptenv add COMPANY_CLOUDFLARE_TOKEN <token>

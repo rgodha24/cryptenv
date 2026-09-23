@@ -1,4 +1,8 @@
-use std::{collections::HashMap, fmt::Write};
+use std::{
+    collections::HashMap,
+    fmt::Write,
+    path::{Path, PathBuf},
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -47,12 +51,20 @@ impl Project {
 
     pub fn get_project_dir(config: &Config) -> Option<String> {
         let current_dir = std::env::current_dir().unwrap();
-        let dirs = config.dirs();
 
-        for dir in dirs.into_iter() {
-            if current_dir.starts_with(&dir) {
-                let original_len = dir.components().collect::<Vec<_>>().len();
-                let parent = current_dir.components().nth(original_len)?;
+        Self::project_dir_for(&current_dir, config).or_else(|| {
+            // Git worktrees usually live outside the configured dirs, so fall back
+            // to the main checkout the worktree belongs to.
+            let main_checkout = main_worktree_of(&current_dir)?;
+            Self::project_dir_for(&main_checkout, config)
+        })
+    }
+
+    fn project_dir_for(path: &Path, config: &Config) -> Option<String> {
+        for dir in config.dirs() {
+            if path.starts_with(&dir) {
+                let original_len = dir.components().count();
+                let parent = path.components().nth(original_len)?;
 
                 return Some(parent.as_os_str().to_str().unwrap().to_string());
             }
@@ -102,4 +114,34 @@ impl Project {
     pub fn into_inner(self) -> HashMap<String, String> {
         self.vars
     }
+}
+
+/// If `path` is inside a linked git worktree, return the root of the main checkout.
+///
+/// A linked worktree has a `.git` *file* containing `gitdir: <main>/.git/worktrees/<name>`,
+/// and that directory has a `commondir` file pointing (usually relatively) at `<main>/.git`.
+fn main_worktree_of(path: &Path) -> Option<PathBuf> {
+    let dot_git = path
+        .ancestors()
+        .map(|p| p.join(".git"))
+        .find(|p| p.exists())?;
+
+    // A `.git` directory means this is already a main checkout (or a plain repo).
+    if !dot_git.is_file() {
+        return None;
+    }
+
+    let contents = std::fs::read_to_string(&dot_git).ok()?;
+    let gitdir = PathBuf::from(contents.trim().strip_prefix("gitdir:")?.trim());
+    let gitdir = dot_git.parent()?.join(gitdir);
+
+    let commondir = std::fs::read_to_string(gitdir.join("commondir")).ok()?;
+    let common = gitdir.join(commondir.trim()).canonicalize().ok()?;
+
+    // Bare repos have no main checkout to follow.
+    if common.file_name()? != ".git" {
+        return None;
+    }
+
+    common.parent().map(Path::to_path_buf)
 }
