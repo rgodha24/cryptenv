@@ -3,6 +3,8 @@ mod project;
 mod store;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use std::io::{self, IsTerminal, Read};
+use std::path::{Path, PathBuf};
 use std::process::{self, Command};
 
 pub use config::{Config, ProjectConfig};
@@ -26,11 +28,18 @@ enum Commands {
         shell: Shell,
     },
     /// Add an environment variable to the store
+    ///
+    /// If no value is given, it is read from stdin (piped input, or a hidden
+    /// prompt when run interactively) so it never ends up in shell history.
     Add {
         /// The name of the environment variable (automatically uppercased)
         name: String,
-        /// The value of the environment variable (will be encrypted)
-        value: String,
+        /// The value of the environment variable (will be encrypted). Use `-` or omit to read from stdin
+        #[arg(conflicts_with = "from_file")]
+        value: Option<String>,
+        /// Read the value from a file
+        #[arg(short, long, value_name = "PATH")]
+        from_file: Option<PathBuf>,
         /// Overwrite the value if it already exists
         #[arg(short, long, default_value_t = false)]
         overwrite: bool,
@@ -151,30 +160,42 @@ fn main() {
         Commands::Add {
             name,
             value,
+            from_file,
             overwrite,
         } => {
             let mut store = Store::read();
             let name = name.to_uppercase();
 
+            // check before reading the value so we don't prompt for a secret we'd throw away
             let is_used = store.get(&name).is_some();
-            match (is_used, overwrite) {
-                (false, _) => {
-                    store.add(name.clone(), &value);
-                    println!("Added {} to store", name);
-                }
-                (true, true) => {
-                    eprintln!("Overwriting value for {}", name);
-                    store.add(name.clone(), &value);
-                }
-                (true, false) => {
-                    eprintln!(
-                        "Value for {} already exists. Use --overwrite to replace it",
-                        name
-                    );
-                }
+            if is_used && !overwrite {
+                eprintln!(
+                    "Value for {} already exists. Use --overwrite to replace it",
+                    name
+                );
+                process::exit(1);
             }
 
+            let value = match (value, from_file) {
+                (Some(v), _) if v != "-" => v,
+                (_, Some(path)) => read_value_from_file(&path),
+                _ => read_value_from_stdin(&name),
+            };
+
+            if value.is_empty() {
+                eprintln!("Refusing to add an empty value for {}", name);
+                process::exit(1);
+            }
+
+            if is_used {
+                eprintln!("Overwriting value for {}", name);
+            }
+            store.add(name.clone(), &value);
             store.save_to_disk();
+
+            if !is_used {
+                println!("Added {} to store", name);
+            }
         }
         Commands::Get { name } => {
             let store = Store::read();
@@ -338,5 +359,45 @@ fn main() {
                 }
             }
         }
+    }
+}
+
+/// Strips a single trailing newline, since files and piped input almost always end with one.
+fn strip_trailing_newline(mut s: String) -> String {
+    if s.ends_with('\n') {
+        s.pop();
+        if s.ends_with('\r') {
+            s.pop();
+        }
+    }
+    s
+}
+
+fn read_value_from_file(path: &Path) -> String {
+    match std::fs::read_to_string(path) {
+        Ok(s) => strip_trailing_newline(s),
+        Err(e) => {
+            eprintln!("Failed to read {}: {}", path.display(), e);
+            process::exit(1);
+        }
+    }
+}
+
+fn read_value_from_stdin(name: &str) -> String {
+    if io::stdin().is_terminal() {
+        match rpassword::prompt_password(format!("Value for {}: ", name)) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Failed to read value: {}", e);
+                process::exit(1);
+            }
+        }
+    } else {
+        let mut s = String::new();
+        if let Err(e) = io::stdin().read_to_string(&mut s) {
+            eprintln!("Failed to read value from stdin: {}", e);
+            process::exit(1);
+        }
+        strip_trailing_newline(s)
     }
 }

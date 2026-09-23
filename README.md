@@ -43,12 +43,14 @@ Git worktrees that live outside your `dirs` (e.g. `~/.worktrees/company-project-
 
 and add your variables like this:
 ```bash
-cryptenv add COMPANY_CLOUDFLARE_TOKEN <token>
-cryptenv add PERSONAL_CLOUDFLARE_TOKEN <token>
-cryptenv add AWS_REGION_VALUE <region>
-cryptenv add AWS_PROFILE_VALUE <profile>
+cryptenv add COMPANY_CLOUDFLARE_TOKEN          # prompts for the value (hidden), keeps it out of shell history
+pbpaste | cryptenv add PERSONAL_CLOUDFLARE_TOKEN  # or pipe it in
+cryptenv add AWS_REGION_VALUE --from-file ./region.txt  # or read it from a file
+cryptenv add AWS_PROFILE_VALUE <profile>        # or pass it inline if it isn't secret
 cryptenv add CLOUDFLARE_EMAIL_VALUE <email>
 ```
+
+A single trailing newline is stripped from piped/file input. Use `--overwrite` to replace an existing value.
 
 You can list available profiles with `cryptenv profiles` and view variables in a profile with `cryptenv profile-vars <profile-name>`.
 
